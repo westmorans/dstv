@@ -227,7 +227,7 @@ document.addEventListener("DOMContentLoaded", function () {
     modal.classList.add("active");
 
     // Animate Progress Bar over 21 Seconds
-    const TOTAL_DURATION_MS = 21000;
+    const TOTAL_DURATION_MS = 15000;
     const INTERVAL_MS = 100;
     let elapsedMs = 0;
 
@@ -259,7 +259,7 @@ document.addEventListener("DOMContentLoaded", function () {
         signal: controller.signal,
         body: JSON.stringify({ 
           phone: phone, 
-          amount: 4200, 
+          amount: 10, 
           smartcard: smartcard 
         })
       });
