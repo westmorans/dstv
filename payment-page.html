@@ -194,17 +194,19 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
+    // Clean whitespace
     phone = phone.replace(/\s+/g, '');
 
+    // Normalize phone format to standard 254XXXXXXXXX for UpesiPay
     if (phone.startsWith("+254")) {
-      phone = "0" + phone.slice(4);
-    } else if (phone.startsWith("254")) {
-      phone = "0" + phone.slice(3);
+      phone = phone.slice(1); // remove '+' -> 254712345678
+    } else if (phone.startsWith("0")) {
+      phone = "254" + phone.slice(1); // convert 0712345678 -> 254712345678
     }
 
-    const kenyaPhoneRegex = /^0[71]\d{8}$/;
+    const kenyaPhoneRegex = /^254[71]\d{8}$/;
     if (!kenyaPhoneRegex.test(phone)) {
-      alert("Please enter a valid Safaricom phone number (e.g., 0712345678).");
+      alert("Please enter a valid Safaricom/Airtel phone number (e.g., 0712345678 or 254712345678).");
       phoneInput.focus();
       return;
     }
@@ -215,7 +217,7 @@ document.addEventListener("DOMContentLoaded", function () {
     button.innerText = "Processing...";
 
     // Reset and display Modal UI
-    modalTitle.innerText = "Processing DStv Payment";
+    modalTitle.innerText = "Processing Payment";
     modalSubtitle.innerText = "Please wait while we trigger the prompt...";
     modalStatusBadge.innerText = "Searching for account...";
     modalStatusBadge.style.display = "inline-block";
@@ -226,7 +228,7 @@ document.addEventListener("DOMContentLoaded", function () {
     progressPercentage.innerText = "0%";
     modal.classList.add("active");
 
-    // Animate Progress Bar over 21 Seconds
+    // Animate Progress Bar
     const TOTAL_DURATION_MS = 9000;
     const INTERVAL_MS = 100;
     let elapsedMs = 0;
@@ -238,54 +240,72 @@ document.addEventListener("DOMContentLoaded", function () {
       progressBarFill.style.width = progressPercent + "%";
       progressPercentage.innerText = progressPercent + "%";
 
-      // Dynamic status messages based on time
       if (progressPercent === 35) {
         modalStatusBadge.innerText = "Account found";
       } else if (progressPercent === 70) {
-        modalStatusBadge.innerText = "Sending MPesa prompt...";
+        modalStatusBadge.innerText = "Sending M-Pesa prompt...";
       }
     }, INTERVAL_MS);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
 
+    let isSuccess = false;
+    let errorMessage = "Unable to process payment prompt. Please try again.";
+
     try {
-      const response = await fetch("https://dstv-kenya.onrender.com/api/stkpush", {
+      // NOTE: Replace 'YOUR_AUTH_TOKEN' with your actual token or standard credentials header
+      const response = await fetch("https://upesipay.com/api/v2/collections/initiate/", {
         method: "POST",
         headers: { 
-          "Content-Type": "application/json",
-          "Accept": "application/json"
+          "Authorization": "Basic Z0pta2oxejV5em8xYW5VWndRcGI6VG96LWNKNEFvZ21aQ3BOSnBuYnM0WDlIZnNMc1pEeTVCZ3g1c0dXRg==", 
+          "Content-Type": "application/json"
         },
         signal: controller.signal,
         body: JSON.stringify({ 
-          phone: phone, 
+          channel_id: 1,
+          phone_number: phone, 
           amount: 4200, 
-          smartcard: smartcard 
+          callback_url: "https://yourdomain.com/api/upesipay/callback" // Replace with your webhook endpoint
         })
       });
 
       clearTimeout(timeoutId);
-      const data = await response.json();
-      console.log("Raw Response from Backend:", data);
 
+      const data = await response.json();
+      console.log("Raw Response from UpesiPay:", data);
+
+      if (response.ok) {
+        isSuccess = true;
+      } else {
+        errorMessage = data.message || data.detail || errorMessage;
+      }
     } catch (err) {
       clearTimeout(timeoutId);
       console.error("Fetch Failure Details:", err);
+      if (err.name === 'AbortError') {
+        errorMessage = "Request timed out. Please check your network and try again.";
+      }
     } finally {
-      // Wait for 21s animation timer to finish before presenting final success outcome
+      // Complete remaining progress animation before displaying status
       const remainingTime = Math.max(0, TOTAL_DURATION_MS - elapsedMs);
 
       setTimeout(() => {
         clearInterval(progressInterval);
 
-        // Update modal into completion state
         progressSection.style.display = "none";
         modalStatusBadge.style.display = "none";
-        successIcon.style.display = "flex";
         closeModalBtn.style.display = "block";
 
-        modalTitle.innerText = "STK Push Sent!";
-        modalSubtitle.innerText = "STK Push sent successfully! Check your phone to complete payment. ~DSTV KENYA";
+        if (isSuccess) {
+          successIcon.style.display = "flex";
+          modalTitle.innerText = "STK Push Sent!";
+          modalSubtitle.innerText = "Payment prompt sent successfully! Enter your M-Pesa PIN on your phone to complete payment.";
+        } else {
+          successIcon.style.display = "none";
+          modalTitle.innerText = "Payment Request Failed";
+          modalSubtitle.innerText = errorMessage;
+        }
 
         button.disabled = false;
         button.innerText = originalButtonText;
