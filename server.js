@@ -10,30 +10,55 @@ app.use(cors());
 // Parse incoming JSON request bodies
 app.use(express.json());
 
+/**
+ * Helper function to normalize Kenyan phone numbers to 254XXXXXXXXX format
+ */
+function formatPhoneNumber(phone) {
+  if (!phone) return '';
+  // Remove spaces, dashes, or plus signs
+  let cleaned = phone.toString().trim().replace(/[\s+-]/g, '');
+  
+  // If local format starting with 07 or 01 (10 digits)
+  if (/^0[17]\d{8}$/.test(cleaned)) {
+    return '254' + cleaned.substring(1);
+  }
+  
+  // If already starts with 254 (12 digits)
+  if (/^254[17]\d{8}$/.test(cleaned)) {
+    return cleaned;
+  }
+  
+  // Return cleaned string as fallback if it doesn't match standard patterns
+  return cleaned;
+}
+
 // ------------------------------------------------------------------
 // 1. Root Route (Fixes "Cannot GET /" & acts as a Render health check)
 // ------------------------------------------------------------------
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'UpesiPay Proxy API',
+    service: 'GravityPay Proxy API',
     timestamp: new Date().toISOString()
   });
 });
 
 // ------------------------------------------------------------------
-// 2. STK Push Collection Endpoint
+// 2. STK Push Collection Endpoint (GravityPay)
 // ------------------------------------------------------------------
 app.post('/api/stkpush', async (req, res) => {
   try {
-    const { phone, amount, smartcard } = req.body;
+    const { phone, amount, reference, description } = req.body;
 
     // Validate input fields
     if (!phone) {
       return res.status(400).json({ success: false, message: 'Phone number is required.' });
     }
 
-    const collectionAmount = Number(amount) || 4200;
+    // Format phone number automatically
+    const formattedPhone = formatPhoneNumber(phone);
+
+    const collectionAmount = Number(amount) || 1000;
     if (collectionAmount < 1 || collectionAmount > 500000) {
       return res.status(400).json({ 
         success: false, 
@@ -41,42 +66,41 @@ app.post('/api/stkpush', async (req, res) => {
       });
     }
 
-    // Read secrets from Render Environment Variables
-    const authToken = process.env.UPESIPAY_AUTH_TOKEN;
-    const channelId = Number(process.env.UPESIPAY_CHANNEL_ID) || 1;
-    const callbackUrl = process.env.UPESIPAY_CALLBACK_URL || '';
+    // Read both keys from Render Environment Variables
+    const secretKey = process.env.GRAVITY_SECRET_KEY;
+    const publicKey = process.env.GRAVITY_PUBLIC_KEY;
 
-    if (!authToken) {
-      console.error('SERVER ERROR: UPESIPAY_AUTH_TOKEN environment variable is missing.');
+    if (!secretKey || !publicKey) {
+      console.error('SERVER ERROR: GRAVITY_SECRET_KEY or GRAVITY_PUBLIC_KEY is missing.');
       return res.status(500).json({ 
         success: false, 
-        message: 'Server configuration error. Auth token missing.' 
+        message: 'Server configuration error. API keys missing.' 
       });
     }
 
-    // Prepare UpesiPay Payload strictly per documentation spec
-    const upesiPayload = {
-      channel_id: channelId,
-      phone_number: phone,
+    // Prepare GravityPay Payload
+    const gravityPayload = {
+      phoneNumber: formattedPhone,
       amount: collectionAmount,
-      callback_url: callbackUrl
+      reference: reference || `INV-${Date.now()}`,
+      description: description || 'Retail Checkout'
     };
 
-    // Format Authorization Header (Attach 'Basic ' prefix if not present in env)
-    const authHeader = authToken.startsWith('Basic ') ? authToken : `Basic ${authToken}`;
+    console.log('Sending GravityPay Payload:', gravityPayload);
 
-    // Dispatch request to UpesiPay API
-    const response = await fetch('https://upesipay.com/api/v2/collections/initiate/', {
+    // Dispatch request to GravityPay STK Push API using both auth headers
+    const response = await fetch('https://api.gravitypayapp.com/api/v1/stk/push', {
       method: 'POST',
       headers: {
-        'Authorization': authHeader,
+        'Authorization': `Bearer ${secretKey}`,
+        'x-api-key': publicKey,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(upesiPayload)
+      body: JSON.stringify(gravityPayload)
     });
 
     const data = await response.json();
-    console.log('UpesiPay API Response:', data);
+    console.log('GravityPay API Response:', data);
 
     if (response.ok) {
       return res.status(200).json({
@@ -87,7 +111,7 @@ app.post('/api/stkpush', async (req, res) => {
     } else {
       return res.status(response.status).json({
         success: false,
-        message: data.message || data.detail || 'Failed to initiate payment with UpesiPay.',
+        message: data.message || data.detail || 'Failed to initiate payment with GravityPay.',
         error: data
       });
     }
@@ -103,14 +127,14 @@ app.post('/api/stkpush', async (req, res) => {
 });
 
 // ------------------------------------------------------------------
-// 3. Webhook Endpoint for UpesiPay Status Callbacks
+// 3. Webhook Endpoint for GravityPay Status Callbacks
 // ------------------------------------------------------------------
 app.post('/api/callback', (req, res) => {
-  console.log('UpesiPay Callback Received:', JSON.stringify(req.body, null, 2));
+  console.log('GravityPay Callback Received:', JSON.stringify(req.body, null, 2));
 
-  // Handle transaction outcome (e.g., update DB, grant DStv subscription, etc.)
-  
-  // Acknowledge receipt to UpesiPay
+  // Handle transaction outcome here (e.g., update DB, grant access, etc.)
+
+  // Acknowledge receipt to GravityPay
   res.status(200).json({ status: 'success', message: 'Callback received' });
 });
 
@@ -119,5 +143,5 @@ app.post('/api/callback', (req, res) => {
 // ------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`UpesiPay server running on port ${PORT}`);
+  console.log(`GravityPay proxy server running on port ${PORT}`);
 });
